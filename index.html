@@ -623,8 +623,15 @@ const CMS_CONFIG = {
 
   <div class="admin-section">
     <h3>🔄 Actualizar contenido</h3>
-    <button class="admin-btn" onclick="loadCMSData()">↺ Recargar desde Sheet</button>
+    <div style="font-size:0.7rem; color:rgba(245,240,235,0.4); margin-bottom:0.75rem; line-height:1.6;">
+      ⏱ Auto-refresh cada <strong style="color:var(--dorado)">5 minutos</strong><br>
+      Última actualización: <strong style="color:var(--blanco)" id="last-refresh-time">—</strong>
+    </div>
+    <button class="admin-btn" onclick="forceReload()">↺ Recargar ahora</button>
     <button class="admin-btn secondary" onclick="toggleAdmin()">✕ Cerrar panel</button>
+    <div class="admin-tip" style="margin-top:0.75rem;">
+      💡 Si editaste la Sheet y no ves cambios, espera <strong>2-3 minutos</strong> y recarga. Google Sheets tiene su propio caché interno.
+    </div>
   </div>
 </div>
 
@@ -671,9 +678,14 @@ async function loadCMSData() {
 }
 
 async function loadTab(tabName, callback) {
-  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${tabName}`;
+  // Agregar timestamp para evitar caché del navegador
+  const cacheBuster = '&t=' + Date.now();
+  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${tabName}${cacheBuster}`;
   try {
-    const res = await fetch(url);
+    const res = await fetch(url, {
+      cache: 'no-store',
+      headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate', 'Pragma': 'no-cache' }
+    });
     const text = await res.text();
     const json = JSON.parse(text.substring(47).slice(0,-2));
     const rows = json.table.rows;
@@ -857,13 +869,23 @@ function toggleAdmin() {
   document.getElementById('admin-panel').classList.toggle('open');
 }
 
+function forceReload() {
+  const btn = document.querySelector('.admin-btn');
+  loadCMSData().then(() => {
+    updateLastRefreshUI();
+  });
+}
+
 function saveSheetId() {
   const id = document.getElementById('input-sheet-id').value.trim();
   if (!id) return;
   SHEET_ID = id;
   localStorage.setItem('decada70_sheet_id', id);
   document.getElementById('cms-connection-status').innerHTML = `<strong style="color:#4caf7d">✓ Conectado</strong><br><span style="color:rgba(245,240,235,0.5);font-size:0.7rem;">ID: ${id.substring(0,20)}...</span>`;
-  loadCMSData();
+  loadCMSData().then(() => {
+    updateLastRefreshUI();
+    startAutoRefresh();
+  });
 }
 
 function downloadTemplate() {
@@ -913,6 +935,36 @@ Arriendo canchas,egreso,120000
   link.href = csvContent;
   link.download = 'plantilla-cms-decada70.txt';
   link.click();
+}
+
+// =============================================
+// AUTO-REFRESH cada 5 minutos
+// =============================================
+let refreshInterval = null;
+let lastRefresh = null;
+
+function startAutoRefresh() {
+  if (refreshInterval) clearInterval(refreshInterval);
+  refreshInterval = setInterval(() => {
+    loadCMSData();
+    updateLastRefreshUI();
+  }, 5 * 60 * 1000); // cada 5 minutos
+}
+
+function updateLastRefreshUI() {
+  lastRefresh = new Date();
+  const el = document.getElementById('last-refresh-time');
+  if (el) {
+    const h = lastRefresh.getHours().toString().padStart(2,'0');
+    const m = lastRefresh.getMinutes().toString().padStart(2,'0');
+    el.textContent = `${h}:${m}`;
+  }
+}
+
+// Arrancar auto-refresh si ya hay sheet configurado
+if (SHEET_ID && SHEET_ID !== 'TU_SHEET_ID_AQUI') {
+  startAutoRefresh();
+  updateLastRefreshUI();
 }
 
 // Nav highlight
